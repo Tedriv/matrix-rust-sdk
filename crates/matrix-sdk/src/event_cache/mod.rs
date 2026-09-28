@@ -945,7 +945,7 @@ mod tests {
         let (room_cache_a, _) = event_cache.room(room_id_a).await.unwrap();
         let (room_cache_b, _) = event_cache.room(room_id_b).await.unwrap();
         let (events_a, mut updates_a) = room_cache_a.subscribe().await.unwrap();
-        let (events_b, mut updates_b) = room_cache_b.subscribe().await.unwrap();
+        let (events_b, updates_b) = room_cache_b.subscribe().await.unwrap();
         assert_eq!(events_a.len(), 1);
         assert_eq!(events_b.len(), 1);
 

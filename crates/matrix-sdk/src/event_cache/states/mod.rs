@@ -497,7 +497,7 @@ impl<'state> ReloadableStateLockWriteGuard<'state> {
             self.state.by_room.iter_mut()
         {
             if requested_room_id
-                .is_some_and(|requested_room_id| room_id.as_ref() != requested_room_id)
+                .is_some_and(|requested_room_id| room_id.as_str() != requested_room_id.as_str())
             {
                 continue;
             }

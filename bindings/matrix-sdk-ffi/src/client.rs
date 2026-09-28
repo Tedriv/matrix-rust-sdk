@@ -2118,6 +2118,21 @@ impl Client {
         Ok(closure().await?)
     }
 
+    /// Forget the persisted and in-memory event cache for exactly one room.
+    ///
+    /// This does not leave or forget the Matrix room, mutate membership or room state, clear
+    /// encryption data, or affect another room's event cache. A valid but unknown room ID and a
+    /// repeated call are both treated as successful no-ops.
+    ///
+    /// Live event-cache observers for the room are notified with a clear update before their
+    /// in-memory cache handle is discarded. Callers that own a higher-level timeline should stop
+    /// publishing that timeline before awaiting this method, then recreate it afterwards. This
+    /// cache operation is physical cleanup; it is not a visibility boundary for a clear marker.
+    pub async fn forget_room_event_cache(&self, room_id: String) -> Result<(), ClientError> {
+        let room_id = RoomId::parse(room_id)?;
+        Ok(self.inner.event_cache().forget_room(&room_id).await?)
+    }
+
     /// Clear all the non-critical caches for this Client instance.
     ///
     /// WARNING: This will clear all the caches, including the base store (state

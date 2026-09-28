@@ -792,6 +792,7 @@ mod tests {
     use std::{ops::Not, sync::Arc, time::Duration};
 
     use assert_matches::assert_matches;
+    use eyeball_im::VectorDiff;
     use futures_util::FutureExt as _;
     use matrix_sdk_base::{
         RoomState,
@@ -804,7 +805,9 @@ mod tests {
     use ruma::{event_id, room_id, user_id};
     use tokio::time::sleep;
 
-    use super::{EventCacheError, RoomEventCacheGenericUpdate};
+    use super::{
+        EventCacheError, RoomEventCacheGenericUpdate, RoomEventCacheUpdate, TimelineVectorDiffs,
+    };
     use crate::test_utils::{
         assert_event_matches_msg, client::MockClientBuilder, logged_in_client,
     };
@@ -884,6 +887,91 @@ mod tests {
         // Retrieving the event with id3 from the room which doesn't contain it will
         // fail…
         assert!(room_event_cache.find_event(eid3).await.unwrap().is_none());
+    }
+
+    #[async_test]
+    async fn test_forget_room_is_scoped_and_idempotent_for_joined_rooms() {
+        let client = logged_in_client(None).await;
+        let room_id_a = room_id!("!room-a:example.org");
+        let room_id_b = room_id!("!room-b:example.org");
+        let unknown_room_id = room_id!("!unknown:example.org");
+
+        client.base_client().get_or_create_room(room_id_a, RoomState::Joined);
+        client.base_client().get_or_create_room(room_id_b, RoomState::Joined);
+
+        let event_cache = client.event_cache();
+        event_cache.subscribe().unwrap();
+
+        let user_id = user_id!("@alice:example.org");
+        let event_id_a = event_id!("$event-a");
+        let event_id_b = event_id!("$event-b");
+        let mut updates = RoomUpdates::default();
+        updates.joined.insert(
+            room_id_a.to_owned(),
+            JoinedRoomUpdate {
+                timeline: Timeline {
+                    events: vec![EventFactory::new()
+                        .room(room_id_a)
+                        .sender(user_id)
+                        .text_msg("room A")
+                        .event_id(event_id_a)
+                        .into()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        updates.joined.insert(
+            room_id_b.to_owned(),
+            JoinedRoomUpdate {
+                timeline: Timeline {
+                    events: vec![EventFactory::new()
+                        .room(room_id_b)
+                        .sender(user_id)
+                        .text_msg("room B")
+                        .event_id(event_id_b)
+                        .into()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        event_cache.inner.handle_room_updates(updates).await.unwrap();
+
+        let (room_cache_a, _) = event_cache.room(room_id_a).await.unwrap();
+        let (room_cache_b, _) = event_cache.room(room_id_b).await.unwrap();
+        let (events_a, mut updates_a) = room_cache_a.subscribe().await.unwrap();
+        let (events_b, mut updates_b) = room_cache_b.subscribe().await.unwrap();
+        assert_eq!(events_a.len(), 1);
+        assert_eq!(events_b.len(), 1);
+
+        event_cache.forget_room(room_id_a).await.unwrap();
+
+        assert_matches!(
+            updates_a.recv().await,
+            Ok(RoomEventCacheUpdate::UpdateTimelineEvents(TimelineVectorDiffs { diffs, .. })) => {
+                assert_eq!(diffs, vec![VectorDiff::Clear]);
+            }
+        );
+        assert!(updates_b.is_empty(), "Room B observer must not receive Room A invalidation");
+        assert!(room_cache_a.events().await.unwrap().is_empty());
+        assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
+        assert!(room_cache_b.find_event(event_id_b).await.unwrap().is_some());
+
+        {
+            let store_lock = client.event_cache_store().lock().await.unwrap();
+            let store = store_lock.as_clean().unwrap();
+            assert!(store.get_room_events(room_id_a, None, None).await.unwrap().is_empty());
+            assert_eq!(store.get_room_events(room_id_b, None, None).await.unwrap().len(), 1);
+        }
+
+        // Repetition and a valid-but-unknown room are safe no-ops.
+        event_cache.forget_room(room_id_a).await.unwrap();
+        event_cache.forget_room(unknown_room_id).await.unwrap();
+
+        assert_eq!(client.get_room(room_id_a).unwrap().state(), RoomState::Joined);
+        assert_eq!(client.get_room(room_id_b).unwrap().state(), RoomState::Joined);
+        assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
     }
 
     #[async_test]

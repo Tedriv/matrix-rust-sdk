@@ -954,7 +954,7 @@ mod tests {
         assert_matches!(
             updates_a.recv().await,
             Ok(RoomEventCacheUpdate::UpdateTimelineEvents(TimelineVectorDiffs { diffs, .. })) => {
-                assert_eq!(diffs, vec![VectorDiff::Clear]);
+                assert_matches!(diffs.as_slice(), [VectorDiff::Clear]);
             }
         );
         assert!(updates_b.is_empty(), "Room B observer must not receive Room A invalidation");

@@ -910,12 +910,14 @@ mod tests {
             room_id_a.to_owned(),
             JoinedRoomUpdate {
                 timeline: Timeline {
-                    events: vec![EventFactory::new()
-                        .room(room_id_a)
-                        .sender(user_id)
-                        .text_msg("room A")
-                        .event_id(event_id_a)
-                        .into()],
+                    events: vec![
+                        EventFactory::new()
+                            .room(room_id_a)
+                            .sender(user_id)
+                            .text_msg("room A")
+                            .event_id(event_id_a)
+                            .into(),
+                    ],
                     ..Default::default()
                 },
                 ..Default::default()
@@ -925,12 +927,14 @@ mod tests {
             room_id_b.to_owned(),
             JoinedRoomUpdate {
                 timeline: Timeline {
-                    events: vec![EventFactory::new()
-                        .room(room_id_b)
-                        .sender(user_id)
-                        .text_msg("room B")
-                        .event_id(event_id_b)
-                        .into()],
+                    events: vec![
+                        EventFactory::new()
+                            .room(room_id_b)
+                            .sender(user_id)
+                            .text_msg("room B")
+                            .event_id(event_id_b)
+                            .into(),
+                    ],
                     ..Default::default()
                 },
                 ..Default::default()

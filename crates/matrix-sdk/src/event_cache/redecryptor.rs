@@ -57,7 +57,7 @@
 //! subscribes to [`RedecryptorReport`] stream.
 //!
 //! ```markdown
-//!
+//! 
 //!      .----------------------.
 //!     |                        |
 //!     |      Beeb, boop!       |
@@ -2044,7 +2044,8 @@ mod tests {
         sleep(Duration::from_millis(200)).await;
     }
 
-    /// Get the cached timeline event kind for a given event ID in a room, if it exists. Returns `None` if the event is not in the cache.
+    /// Get the cached timeline event kind for a given event ID in a room, if it
+    /// exists. Returns `None` if the event is not in the cache.
     async fn get_cached_timeline_event_kind(
         client: &Client,
         room_id: &RoomId,
@@ -2076,7 +2077,8 @@ mod tests {
         )
     }
 
-    /// Helper method to set up a test with two clients in a room, with mocked members and encryption enabled.
+    /// Helper method to set up a test with two clients in a room, with mocked
+    /// members and encryption enabled.
     async fn set_up_thread_test(room_id: &RoomId) -> (Client, Client, MatrixMockServer) {
         let (alice, bob, matrix_mock_server, _) = set_up_clients(room_id, true, false).await;
         let event_factory = EventFactory::new().room(room_id);
@@ -2091,7 +2093,8 @@ mod tests {
         (alice, bob, matrix_mock_server)
     }
 
-    /// Case 1 (normal): the key arrives first, then the root and the reply as separate events.
+    /// Case 1 (normal): the key arrives first, then the root and the reply as
+    /// separate events.
     #[async_test]
     async fn test_thread_reply_in_timeline_after_key() {
         let room_id = room_id!("!test:localhost");
@@ -2137,7 +2140,8 @@ mod tests {
         );
     }
 
-    /// Case 2: The key arrives first, then the root and bundled reply arrive in a single sync.
+    /// Case 2: The key arrives first, then the root and bundled reply arrive in
+    /// a single sync.
     #[async_test]
     async fn test_bundled_thread_reply_after_key_decryptable_root() {
         let room_id = room_id!("!test:localhost");
@@ -2196,7 +2200,8 @@ mod tests {
         );
     }
 
-    /// Case 3: The root key arrives first, then the root and bundled reply arrive in a single sync, then the reply key arrives.
+    /// Case 3: The root key arrives first, then the root and bundled reply
+    /// arrive in a single sync, then the reply key arrives.
     #[async_test]
     async fn test_bundled_thread_reply_key_arrives_later() {
         let room_id = room_id!("!test:localhost");
@@ -2230,7 +2235,8 @@ mod tests {
         )
         .await;
 
-        // Bob receives the root key first, then the root and reply events bundled together, but not the reply key.
+        // Bob receives the root key first, then the root and reply events bundled
+        // together, but not the reply key.
         sync_room_keys(&server, &bob, &[root_key]).await;
         sync_room(
             &server,
@@ -2243,12 +2249,14 @@ mod tests {
         )
         .await;
 
-        // Bob should have both events in his cache, but should only be able to decrypt the root.
+        // Bob should have both events in his cache, but should only be able to decrypt
+        // the root.
         assert_matches!(
             get_cached_timeline_event_kind(&bob, room_id, root_id).await,
             Some(TimelineEventKind::Decrypted { .. })
         );
-        // Bob should also know why the decryption failed, rather than a generic `UnableToDecryptReason::Unknown`.
+        // Bob should also know why the decryption failed, rather than a generic
+        // `UnableToDecryptReason::Unknown`.
         assert_let!(
             Some(TimelineEventKind::UnableToDecrypt { utd_info, .. }) =
                 get_cached_timeline_event_kind(&bob, room_id, reply_id).await
@@ -2268,7 +2276,8 @@ mod tests {
         );
     }
 
-    /// Case 4: The reply key arrives first, then the root and bundled reply arrive in a single sync, then the root key arrives.
+    /// Case 4: The reply key arrives first, then the root and bundled reply
+    /// arrive in a single sync, then the root key arrives.
     #[async_test]
     async fn test_bundled_thread_reply_root_key_arrives_later() {
         let room_id = room_id!("!test:localhost");
@@ -2302,7 +2311,8 @@ mod tests {
         )
         .await;
 
-        // Bob receives the reply key first, then the root and reply events bundled together, but not the root key.
+        // Bob receives the reply key first, then the root and reply events bundled
+        // together, but not the root key.
         sync_room_keys(&server, &bob, &[reply_key]).await;
         sync_room(
             &server,
@@ -2315,9 +2325,10 @@ mod tests {
         )
         .await;
 
-        // Bob should have both events in his cache, but should not be able to decrypt either of them.
-        // The spec doesn't require us to be able to decrypt the reply if the root is not decryptable,
-        // even if we have the key (aside: we have the key, why not decrypt it?).
+        // Bob should have both events in his cache, but should not be able to decrypt
+        // either of them. The spec doesn't require us to be able to decrypt the
+        // reply if the root is not decryptable, even if we have the key (aside:
+        // we have the key, why not decrypt it?).
         assert_matches!(
             get_cached_timeline_event_kind(&bob, room_id, root_id).await,
             Some(TimelineEventKind::UnableToDecrypt { .. })

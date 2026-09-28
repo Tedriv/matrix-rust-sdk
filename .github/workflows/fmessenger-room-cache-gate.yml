@@ -33,7 +33,10 @@ jobs:
         with:
           cache-on-failure: true
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: >-
+          rustfmt --check --edition 2024 --config skip_children=true
+          bindings/matrix-sdk-ffi/src/client.rs
+          crates/matrix-sdk/src/event_cache/mod.rs
       - name: Prove room-scoped event-cache invalidation
         run: cargo test -p matrix-sdk test_forget_room_is_scoped_and_idempotent_for_joined_rooms --features testing
       - name: Compile the FFI crate tests

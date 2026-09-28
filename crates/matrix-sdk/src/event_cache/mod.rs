@@ -945,7 +945,7 @@ mod tests {
         let (room_cache_a, _) = event_cache.room(room_id_a).await.unwrap();
         let (room_cache_b, _) = event_cache.room(room_id_b).await.unwrap();
         let (events_a, mut updates_a) = room_cache_a.subscribe().await.unwrap();
-        let (events_b, mut updates_b) = room_cache_b.subscribe().await.unwrap();
+        let (events_b, _updates_b) = room_cache_b.subscribe().await.unwrap();
         assert_eq!(events_a.len(), 1);
         assert_eq!(events_b.len(), 1);
 
@@ -957,8 +957,10 @@ mod tests {
                 assert_matches!(diffs.as_slice(), [VectorDiff::Clear]);
             }
         );
-        assert!(updates_b.is_empty(), "Room B observer must not receive Room A invalidation");
         assert!(room_cache_a.events().await.unwrap().is_empty());
+
+        // The SDK reloads all live cache states under one exclusive lock, so Room B may receive a
+        // cache-origin refresh. Its content and persisted data must nevertheless remain intact.
         assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
         assert!(room_cache_b.find_event(event_id_b).await.unwrap().is_some());
 

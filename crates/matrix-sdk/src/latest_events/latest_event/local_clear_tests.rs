@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use assert_matches::assert_matches;
 use matrix_sdk_base::{
     RoomState,
@@ -147,6 +149,55 @@ async fn test_local_clear_preview_state_boundary() {
     ])
     .await;
     t.gate(event_id!("$boundary")).await;
+    t.assert_id(None).await;
+}
+
+#[async_test]
+async fn test_local_clear_preview_redacted_boundary() {
+    let f = factory();
+    let mut t = Fixture::new(vec![
+        f.text_msg("old").event_id(event_id!("$old")).into(),
+        f.redacted(
+            user_id!("@alice:server.org"),
+            ruma::events::room::message::RedactedRoomMessageEventContent::new(),
+        )
+        .event_id(event_id!("$boundary"))
+        .into(),
+    ])
+    .await;
+    t.gate(event_id!("$boundary")).await;
+    t.assert_id(None).await;
+}
+
+#[async_test]
+async fn test_local_clear_preview_boundary_change_recomputes() {
+    let f = factory();
+    let mut t = Fixture::new(vec![
+        f.text_msg("boundary").event_id(event_id!("$boundary")).into(),
+        f.text_msg("new").event_id(event_id!("$new")).into(),
+    ])
+    .await;
+    t.gate(event_id!("$boundary")).await;
+    t.assert_id(Some(event_id!("$new"))).await;
+    t.gate(event_id!("$new")).await;
+    t.assert_id(None).await;
+}
+
+#[async_test]
+async fn test_local_clear_preview_failed_local_cannot_bypass() {
+    let mut t =
+        Fixture::new(vec![factory().text_msg("boundary").event_id(event_id!("$boundary")).into()])
+            .await;
+    t.local().await;
+    let update = RoomSendQueueUpdate::SendError {
+        transaction_id: "pending".into(),
+        error: Arc::new(crate::Error::UnknownError("offline".to_owned().into())),
+        is_recoverable: false,
+    };
+    t.latest.update_with_send_queue(&update, &t.cache, user_id!("@alice:server.org"), None).await;
+    assert_matches!(t.latest.get().await, LatestEventValue::LocalCannotBeSent(_));
+    t.gate(event_id!("$boundary")).await;
+    t.latest.update_with_send_queue(&update, &t.cache, user_id!("@alice:server.org"), None).await;
     t.assert_id(None).await;
 }
 

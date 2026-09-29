@@ -197,6 +197,10 @@ impl LatestEvent {
         room: Room,
         reasons: RoomInfoNotableUpdateReasons,
     ) {
+        if self.local_clear_boundary.is_some() {
+            // RoomInfo (including membership changes) cannot prove suffix order.
+            return;
+        }
         // If the `RoomInfo` has been updated due to a change of the own membership.
         if reasons.contains(RoomInfoNotableUpdateReasons::MEMBERSHIP) {
             let new_value = match room.state() {

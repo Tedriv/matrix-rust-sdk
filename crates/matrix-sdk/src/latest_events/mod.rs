@@ -98,6 +98,21 @@ struct LatestEventsState {
 }
 
 impl LatestEvents {
+    /// Install a per-user room preview gate and compute only from the proven
+    /// remote suffix after `boundary`. Unknown order is represented by `None`.
+    /// Callers must resolve account data before publishing the returned value.
+    pub async fn latest_event_after_boundary(
+        &self,
+        room_id: &RoomId,
+        boundary: &EventId,
+    ) -> Result<LatestEventValue, LatestEventsError> {
+        let Some(room_latest_events) = self.state.registered_rooms.for_room(room_id).await? else {
+            return Ok(LatestEventValue::None);
+        };
+        let mut guard = room_latest_events.write().await;
+        Ok(guard.latest_event_after_boundary(boundary).await)
+    }
+
     /// Create a new [`LatestEvents`].
     pub(crate) fn new(
         weak_client: WeakClient,

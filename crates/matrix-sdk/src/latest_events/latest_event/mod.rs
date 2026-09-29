@@ -13,6 +13,8 @@
 // limitations under the License.
 
 mod builder;
+#[cfg(all(test, not(target_family = "wasm")))]
+mod local_clear_tests;
 
 use std::ops::{Deref, DerefMut, Not};
 
@@ -54,6 +56,8 @@ pub(super) struct LatestEvent {
 
     /// The latest event value.
     current_value: SharedObservable<LatestEventValue, AsyncLock>,
+    /// Installed by the account-data owner before requesting a room preview.
+    local_clear_boundary: Option<OwnedEventId>,
 }
 
 impl LatestEvent {
@@ -73,6 +77,7 @@ impl LatestEvent {
                 _thread_id: thread_id.map(ToOwned::to_owned),
                 buffer_of_values_for_local_events: BufferOfValuesForLocalEvents::new(),
                 current_value: SharedObservable::new_async(latest_event_value),
+                local_clear_boundary: None,
             },
             with: is_none,
         }
@@ -83,9 +88,20 @@ impl LatestEvent {
         self.current_value.subscribe().await
     }
 
-    #[cfg(test)]
     pub async fn get(&self) -> LatestEventValue {
         self.current_value.get().await
+    }
+
+    pub fn local_clear_boundary(&self) -> Option<&EventId> {
+        self.local_clear_boundary.as_deref()
+    }
+
+    pub async fn install_local_clear_boundary(&mut self, boundary: &EventId) {
+        if self.local_clear_boundary.as_deref() != Some(boundary) {
+            self.local_clear_boundary = Some(boundary.to_owned());
+            // Never publish an unverified restored value or a pending local value.
+            self.update(LatestEventValue::None).await;
+        }
     }
 
     /// Update the inner latest event value, based on the event cache
@@ -106,6 +122,17 @@ impl LatestEvent {
         own_user_id: &UserId,
         power_levels: Option<&RoomPowerLevels>,
     ) -> NeedMoreEvents {
+        if let Some(boundary) = self.local_clear_boundary.as_deref() {
+            let (value, found) = Builder::new_remote_after_boundary(
+                room_event_cache,
+                boundary,
+                own_user_id,
+                power_levels,
+            )
+            .await;
+            self.update(value).await;
+            return if found { NeedMoreEvents::No } else { NeedMoreEvents::Yes };
+        }
         if self.buffer_of_values_for_local_events.is_empty().not() {
             // At least one `LatestEventValue` exists for local events (i.e. coming from the
             // send queue). In this case, we don't overwrite the current value with a newly
@@ -140,6 +167,12 @@ impl LatestEvent {
         own_user_id: &UserId,
         power_levels: Option<&RoomPowerLevels>,
     ) {
+        if self.local_clear_boundary.is_some() {
+            // All local states, including HasBeenSent, wait for a proven remote
+            // event in the cache. Cache updates independently trigger recomputation.
+            self.update_with_event_cache(room_event_cache, own_user_id, power_levels).await;
+            return;
+        }
         let current_event = self.current_value.get().await;
         let new_value = Builder::new_local(
             send_queue_update,

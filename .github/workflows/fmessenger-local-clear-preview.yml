@@ -1,0 +1,175 @@
+name: FMessenger local clear preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/fmessenger-room-cache-gate-v1
+      - codex/fmessenger-room-cache-reopen-v1
+
+permissions:
+  contents: read
+
+env:
+  COMPONENTS_COMMIT: a9be84bd16c5fa1be1b4bb1c6addc5b4f80b3781
+  ARTIFACT_VERSION: 26.09.26-fmessenger.3
+  NDK_VERSION: 29.0.14206865
+  RUSTFLAGS: -Clink-args=-Wl,--build-id
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        with:
+          cache-on-failure: true
+      - name: Check formatting
+        run: >-
+          rustfmt --check --edition 2024 --config skip_children=true
+          bindings/matrix-sdk-ffi/src/client.rs
+          crates/matrix-sdk/src/event_cache/mod.rs
+          bindings/matrix-sdk-ffi/src/room/mod.rs
+          crates/matrix-sdk-ui/src/timeline/traits.rs
+          crates/matrix-sdk/src/latest_events/mod.rs
+          crates/matrix-sdk/src/latest_events/room_latest_events.rs
+          crates/matrix-sdk/src/latest_events/latest_event/{mod,builder,local_clear_tests}.rs
+      - name: Prove boundary-aware preview and Local gate
+        run: cargo test -p matrix-sdk local_clear_preview_ --features testing
+      - name: Verify existing latest-event UI mapping
+        run: cargo test -p matrix-sdk-ui latest_event --lib
+      - name: Prove room-scoped invalidation and reopen
+        run: cargo test -p matrix-sdk test_forget_room_ --features testing
+      - name: Compile the FFI crate tests
+        run: cargo test -p matrix-sdk-ffi --no-run
+
+  build-target:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - i686-linux-android
+          - x86_64-linux-android
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Checkout provenance-matched Kotlin components
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: matrix-org/matrix-rust-components-kotlin
+          ref: ${{ env.COMPONENTS_COMMIT }}
+          path: rust-components-kotlin
+          persist-credentials: false
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Select the preinstalled Android NDK
+        shell: bash
+        run: |
+          ndk_path="$ANDROID_HOME/ndk/$NDK_VERSION"
+          test -d "$ndk_path"
+          echo "ANDROID_NDK_HOME=$ndk_path" >> "$GITHUB_ENV"
+      - uses: malinskiy/action-android/install-sdk@fa103ef30331e95f266418a6a97e98f61f626887
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+        with:
+          toolchain: "1.96.0"
+          targets: ${{ matrix.target }}
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        with:
+          key: android-${{ matrix.target }}
+          cache-on-failure: true
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build Rust library and generate UniFFI bindings
+        run: >-
+          cargo xtask kotlin build-android-library
+          --profile small-release-stripped
+          --only-target ${{ matrix.target }}
+          --src-dir rust-components-kotlin/sdk/sdk-android/src/main
+          --package full-sdk
+      - name: Upload native library
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: native-${{ matrix.target }}
+          path: rust-components-kotlin/sdk/sdk-android/src/main/jniLibs/*/libmatrix_sdk_ffi.so
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload generated Kotlin binding
+        if: matrix.target == 'x86_64-linux-android'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: generated-kotlin-binding
+          path: rust-components-kotlin/sdk/sdk-android/src/main/kotlin/
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs:
+      - test
+      - build-target
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout provenance-matched Kotlin components
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: matrix-org/matrix-rust-components-kotlin
+          ref: ${{ env.COMPONENTS_COMMIT }}
+          persist-credentials: false
+      - name: Download native libraries
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: sdk/sdk-android/src/main/jniLibs/
+      - name: Download generated Kotlin binding
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: generated-kotlin-binding
+          path: sdk/sdk-android/src/main/kotlin/
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: malinskiy/action-android/install-sdk@fa103ef30331e95f266418a6a97e98f61f626887
+      - name: Stamp the FMessenger-controlled version
+        shell: bash
+        run: |
+          sed -i 's/patchVersion = "26"/patchVersion = "26-fmessenger.3"/' buildSrc/src/main/kotlin/BuildVersionsSDK.kt
+      - name: Assemble release AAR
+        run: ./gradlew :sdk:sdk-android:assembleRelease
+      - name: Name and hash immutable artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp sdk/sdk-android/build/outputs/aar/sdk-android-release.aar "dist/sdk-android-$ARTIFACT_VERSION.aar"
+          sha256sum "dist/sdk-android-$ARTIFACT_VERSION.aar" | tee "dist/sdk-android-$ARTIFACT_VERSION.aar.sha256"
+          {
+            echo "MATRIX_RUST_SDK_COMMIT=$GITHUB_SHA"
+            echo "MATRIX_RUST_COMPONENTS_KOTLIN_COMMIT=$COMPONENTS_COMMIT"
+            echo "ARTIFACT_VERSION=$ARTIFACT_VERSION"
+          } > dist/provenance.txt
+      - name: Upload immutable SDK artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: sdk-android-${{ env.ARTIFACT_VERSION }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+

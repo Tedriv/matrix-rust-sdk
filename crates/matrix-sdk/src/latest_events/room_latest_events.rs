@@ -128,6 +128,12 @@ pub(super) struct RoomLatestEventsWriteGuard {
 }
 
 impl RoomLatestEventsWriteGuard {
+    pub async fn latest_event_after_boundary(&mut self, boundary: &EventId) -> super::LatestEventValue {
+        self.inner.for_the_room.install_local_clear_boundary(boundary).await;
+        self.update_with_event_cache().await;
+        self.inner.for_the_room.get().await
+    }
+
     /// Check whether this [`RoomLatestEvents`] has a latest event for a
     /// particular thread.
     pub fn has_thread(&self, thread_id: &EventId) -> bool {
@@ -197,7 +203,12 @@ impl RoomLatestEventsWriteGuard {
                 .await,
             NeedMoreEvents::Yes
         ) {
-            Self::back_paginate_for_candidate(&room, own_user_id, power_levels.as_ref());
+            Self::back_paginate_for_candidate(
+                &room,
+                own_user_id,
+                power_levels.as_ref(),
+                for_the_room.local_clear_boundary().map(ToOwned::to_owned),
+            );
         }
 
         for latest_event in per_thread.values_mut() {
@@ -296,6 +307,7 @@ impl RoomLatestEventsWriteGuard {
         room: &Room,
         own_user_id: &UserId,
         power_levels: Option<&RoomPowerLevels>,
+        boundary: Option<OwnedEventId>,
     ) {
         let Some(queue) = room.client().event_cache().back_pagination_queue() else {
             return;
@@ -310,7 +322,10 @@ impl RoomLatestEventsWriteGuard {
         // and a stop condition only ever sees the batch it just loaded.
         let stop = move |outcome: &BackPaginationOutcome| {
             let found = outcome.events.iter().any(|event| {
-                filter_timeline_event(event, None, &own_user_id, power_levels.as_ref()).is_break()
+                match boundary.as_deref() {
+                    Some(boundary) => event.event_id() == Some(boundary),
+                    None => filter_timeline_event(event, None, &own_user_id, power_levels.as_ref()).is_break(),
+                }
             });
 
             if found { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }

@@ -44,6 +44,61 @@ use crate::{Room, event_cache::RoomEventCache, room::Invite, send_queue::RoomSen
 pub(super) struct Builder;
 
 impl Builder {
+    /// Select only from the ordered suffix after an exact local-clear boundary.
+    /// A candidate is provisional until the boundary is found in the same read
+    /// snapshot. Neither local echoes nor a persisted latest value prove order.
+    pub async fn new_remote_after_boundary(
+        room_event_cache: &RoomEventCache,
+        boundary: &ruma::EventId,
+        own_user_id: &UserId,
+        power_levels: Option<&RoomPowerLevels>,
+    ) -> (LatestEventValue, bool) {
+        let mut candidate = None;
+        let mut latest_edits: HashMap<OwnedEventId, TimelineEvent> = HashMap::new();
+        let found_boundary = room_event_cache
+            .rfind_map_event_in_memory_by(|event| {
+                // Check raw identity before filtering reactions, state or redacted events.
+                if event.event_id() == Some(boundary) {
+                    return Some(());
+                }
+                if candidate.is_some() {
+                    return None;
+                }
+                match filter_timeline_event(event, None, own_user_id, power_levels) {
+                    ControlFlow::Continue(FilterContinue { edited_event_id, .. }) => {
+                        if let Some(target) = edited_event_id {
+                            latest_edits.entry(target).or_insert_with(|| event.clone());
+                        }
+                    }
+                    ControlFlow::Break(()) => {
+                        let replacement = event.event_id().and_then(|id| latest_edits.get(id));
+                        candidate = Some(match replacement {
+                            Some(edit)
+                                if check_validity_of_replacement_events(
+                                    event.kind.raw(),
+                                    event.kind.encryption_info().map(|info| &(**info)),
+                                    edit.kind.raw(),
+                                    edit.kind.encryption_info().map(|info| &(**info)),
+                                )
+                                .is_ok() => edit.clone(),
+                            _ => event.clone(),
+                        });
+                    }
+                }
+                None
+            })
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        let value = if found_boundary {
+            candidate.map(LatestEventValue::Remote).unwrap_or_default()
+        } else {
+            LatestEventValue::None
+        };
+        (value, found_boundary)
+    }
+
     /// Create a new [`LatestEventValue::Remote`].
     pub async fn new_remote(
         room_event_cache: &RoomEventCache,

@@ -45,7 +45,7 @@ jobs:
       - name: Prove boundary-aware preview and Local gate
         run: cargo test -p matrix-sdk local_clear_preview_ --features testing
       - name: Verify existing latest-event behavior
-        run: cargo test -p matrix-sdk latest_events:: --features testing
+        run: 'cargo test -p matrix-sdk latest_events:: --features testing'
       - name: Verify existing latest-event UI mapping
         run: cargo test -p matrix-sdk-ui latest_event --lib
       - name: Prove room-scoped invalidation and reopen

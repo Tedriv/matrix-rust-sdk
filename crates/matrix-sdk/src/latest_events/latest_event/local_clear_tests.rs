@@ -31,7 +31,7 @@ struct Fixture {
 }
 
 fn factory() -> EventFactory {
-    EventFactory::new().room(owned_room_id!("!preview")).sender(user_id!("@alice:server.org"))
+    EventFactory::new().room(&owned_room_id!("!preview")).sender(user_id!("@alice:server.org"))
 }
 
 impl Fixture {
@@ -72,7 +72,7 @@ impl Fixture {
     }
 
     fn local_update(&self) -> RoomSendQueueUpdate {
-        let queue = self.client.get_room(&owned_room_id!("!preview")).unwrap().send_queue();
+        let queue = self.client.send_queue().for_room(self.client.get_room(&owned_room_id!("!preview")).unwrap());
         let transaction_id: OwnedTransactionId = "pending".into();
         RoomSendQueueUpdate::NewLocalEvent(LocalEcho {
             transaction_id: transaction_id.clone(),

@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/fmessenger-room-cache-gate-v1
-      - codex/fmessenger-room-cache-reopen-v1
+      - codex/fmessenger-local-clear-preview-sdk-v1
 
 permissions:
   contents: read

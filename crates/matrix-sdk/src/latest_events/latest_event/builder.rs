@@ -80,7 +80,10 @@ impl Builder {
                                     edit.kind.raw(),
                                     edit.kind.encryption_info().map(|info| &(**info)),
                                 )
-                                .is_ok() => edit.clone(),
+                                .is_ok() =>
+                            {
+                                edit.clone()
+                            }
                             _ => event.clone(),
                         });
                     }

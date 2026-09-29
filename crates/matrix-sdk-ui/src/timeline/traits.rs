@@ -66,7 +66,10 @@ pub trait RoomExt {
 
     /// Resolve a local-clear preview boundary before publishing any latest event.
     /// Only a remote candidate in the ordered suffix is eligible; unknown is empty.
-    fn latest_event_after_boundary(&self, boundary: &EventId) -> impl Future<Output = LatestEventValue>;
+    fn latest_event_after_boundary(
+        &self,
+        boundary: &EventId,
+    ) -> impl Future<Output = LatestEventValue>;
 
     /// Create a [`ThreadListService`] for this room.
     ///
@@ -79,8 +82,11 @@ pub trait RoomExt {
 impl RoomExt for Room {
     async fn latest_event_after_boundary(&self, boundary: &EventId) -> LatestEventValue {
         let client = self.client();
-        let value = client.latest_events().await
-            .latest_event_after_boundary(self.room_id(), boundary).await
+        let value = client
+            .latest_events()
+            .await
+            .latest_event_after_boundary(self.room_id(), boundary)
+            .await
             .unwrap_or_default();
         LatestEventValue::from_base_latest_event_value(value, self, &client).await
     }

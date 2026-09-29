@@ -327,7 +327,10 @@ impl Room {
     }
 
     /// Fail-closed room preview after an exact account-data local-clear boundary.
-    async fn latest_event_after_boundary(&self, boundary_event_id: String) -> Result<LatestEventValue, ClientError> {
+    async fn latest_event_after_boundary(
+        &self,
+        boundary_event_id: String,
+    ) -> Result<LatestEventValue, ClientError> {
         let boundary = EventId::parse(boundary_event_id)?;
         Ok(self.inner.latest_event_after_boundary(&boundary).await.into())
     }

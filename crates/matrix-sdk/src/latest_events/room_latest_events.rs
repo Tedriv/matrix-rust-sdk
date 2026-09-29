@@ -128,7 +128,10 @@ pub(super) struct RoomLatestEventsWriteGuard {
 }
 
 impl RoomLatestEventsWriteGuard {
-    pub async fn latest_event_after_boundary(&mut self, boundary: &EventId) -> super::LatestEventValue {
+    pub async fn latest_event_after_boundary(
+        &mut self,
+        boundary: &EventId,
+    ) -> super::LatestEventValue {
         self.inner.for_the_room.install_local_clear_boundary(boundary).await;
         self.update_with_event_cache().await;
         self.inner.for_the_room.get().await
@@ -321,11 +324,10 @@ impl RoomLatestEventsWriteGuard {
         // second pass can't be skipped though as an event's edits are newer than it
         // and a stop condition only ever sees the batch it just loaded.
         let stop = move |outcome: &BackPaginationOutcome| {
-            let found = outcome.events.iter().any(|event| {
-                match boundary.as_deref() {
-                    Some(boundary) => event.event_id() == Some(boundary),
-                    None => filter_timeline_event(event, None, &own_user_id, power_levels.as_ref()).is_break(),
-                }
+            let found = outcome.events.iter().any(|event| match boundary.as_deref() {
+                Some(boundary) => event.event_id() == Some(boundary),
+                None => filter_timeline_event(event, None, &own_user_id, power_levels.as_ref())
+                    .is_break(),
             });
 
             if found { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }

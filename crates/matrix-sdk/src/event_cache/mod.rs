@@ -631,11 +631,12 @@ impl EventCacheInner {
         // The constraints are very similar to what we do in `clear_all_rooms`. See this
         // information to understand them.
 
-        let mut caches_for_all_rooms = self.by_room.write().await;
+        let caches_for_all_rooms = self.by_room.write().await;
         self.state.clear_and_reload(&caches_for_all_rooms, Some(room_id)).await?;
 
-        // Finally, we forget all the caches if any exists in memory.
-        caches_for_all_rooms.remove(room_id);
+        // Keep the cache paired with its state. Reload cleared its data and sent
+        // updates to existing observers; dropping only the cache here would make
+        // the next `Caches::new` fail to insert the still-present room state.
 
         Ok(())
     }
@@ -976,6 +977,105 @@ mod tests {
         assert_eq!(client.get_room(room_id_a).unwrap().state(), RoomState::Joined);
         assert_eq!(client.get_room(room_id_b).unwrap().state(), RoomState::Joined);
         assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
+    }
+
+    #[async_test]
+    async fn test_forget_room_reopens_joined_room_without_losing_observers() {
+        let client = logged_in_client(None).await;
+        let room_id_a = room_id!("!reopen-a:example.org");
+        let room_id_b = room_id!("!reopen-b:example.org");
+        let user_id = user_id!("@alice:example.org");
+        let event_id_a = event_id!("$reopen-a-before");
+        let event_id_b = event_id!("$reopen-b");
+
+        client.base_client().get_or_create_room(room_id_a, RoomState::Joined);
+        client.base_client().get_or_create_room(room_id_b, RoomState::Joined);
+
+        let event_cache = client.event_cache();
+        event_cache.subscribe().unwrap();
+
+        let mut updates = RoomUpdates::default();
+        for (room_id, event_id) in [(room_id_a, event_id_a), (room_id_b, event_id_b)] {
+            updates.joined.insert(
+                room_id.to_owned(),
+                JoinedRoomUpdate {
+                    timeline: Timeline {
+                        events: vec![
+                            EventFactory::new()
+                                .room(room_id)
+                                .sender(user_id)
+                                .text_msg("before forget")
+                                .event_id(event_id)
+                                .into(),
+                        ],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            );
+        }
+        event_cache.inner.handle_room_updates(updates).await.unwrap();
+
+        let (room_cache_a, _) = event_cache.room(room_id_a).await.unwrap();
+        let (room_cache_b, _) = event_cache.room(room_id_b).await.unwrap();
+        let (events_a, mut updates_a) = room_cache_a.subscribe().await.unwrap();
+        let (events_b, updates_b) = room_cache_b.subscribe().await.unwrap();
+        assert_eq!(events_a.len(), 1);
+        assert_eq!(events_b.len(), 1);
+
+        event_cache.forget_room(room_id_a).await.unwrap();
+        assert_matches!(
+            updates_a.recv().await,
+            Ok(RoomEventCacheUpdate::UpdateTimelineEvents(TimelineVectorDiffs { diffs, .. })) => {
+                assert_matches!(diffs.as_slice(), [VectorDiff::Clear]);
+            }
+        );
+
+        // Reopening used to construct a second room cache while its first state still
+        // occupied StateLock.state.by_room, yielding CacheStateAlreadyExists.
+        let (reopened_a, _) = event_cache.room(room_id_a).await.unwrap();
+        assert!(reopened_a.events().await.unwrap().is_empty());
+        assert_eq!(client.get_room(room_id_a).unwrap().state(), RoomState::Joined);
+        assert!(updates_b.is_empty());
+        assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
+        assert!(room_cache_b.find_event(event_id_b).await.unwrap().is_some());
+
+        // An observer created before forget must remain connected to later room updates.
+        let event_id_a_after = event_id!("$reopen-a-after");
+        let mut updates = RoomUpdates::default();
+        updates.joined.insert(
+            room_id_a.to_owned(),
+            JoinedRoomUpdate {
+                timeline: Timeline {
+                    events: vec![
+                        EventFactory::new()
+                            .room(room_id_a)
+                            .sender(user_id)
+                            .text_msg("after forget")
+                            .event_id(event_id_a_after)
+                            .into(),
+                    ],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        event_cache.inner.handle_room_updates(updates).await.unwrap();
+        assert!(updates_a.recv().await.is_ok());
+        assert!(reopened_a.find_event(event_id_a_after).await.unwrap().is_some());
+        assert!(room_cache_a.find_event(event_id_a_after).await.unwrap().is_some());
+
+        event_cache.forget_room(room_id_a).await.unwrap();
+        let (reopened_again_a, _) = event_cache.room(room_id_a).await.unwrap();
+        assert!(reopened_again_a.events().await.unwrap().is_empty());
+        assert!(updates_b.is_empty());
+        assert_eq!(room_cache_b.events().await.unwrap().len(), 1);
+        assert!(room_cache_b.find_event(event_id_b).await.unwrap().is_some());
+
+        let store_lock = client.event_cache_store().lock().await.unwrap();
+        let store = store_lock.as_clean().unwrap();
+        assert!(store.get_room_events(room_id_a, None, None).await.unwrap().is_empty());
+        assert_eq!(store.get_room_events(room_id_b, None, None).await.unwrap().len(), 1);
     }
 
     #[async_test]

@@ -5,13 +5,14 @@ on:
   push:
     branches:
       - codex/fmessenger-room-cache-gate-v1
+      - codex/fmessenger-room-cache-reopen-v1
 
 permissions:
   contents: read
 
 env:
   COMPONENTS_COMMIT: a9be84bd16c5fa1be1b4bb1c6addc5b4f80b3781
-  ARTIFACT_VERSION: 26.09.26-fmessenger.1
+  ARTIFACT_VERSION: 26.09.26-fmessenger.2
   NDK_VERSION: 29.0.14206865
   RUSTFLAGS: -Clink-args=-Wl,--build-id
 
@@ -37,8 +38,8 @@ jobs:
           rustfmt --check --edition 2024 --config skip_children=true
           bindings/matrix-sdk-ffi/src/client.rs
           crates/matrix-sdk/src/event_cache/mod.rs
-      - name: Prove room-scoped event-cache invalidation
-        run: cargo test -p matrix-sdk test_forget_room_is_scoped_and_idempotent_for_joined_rooms --features testing
+      - name: Prove room-scoped invalidation and reopen
+        run: cargo test -p matrix-sdk test_forget_room_ --features testing
       - name: Compile the FFI crate tests
         run: cargo test -p matrix-sdk-ffi --no-run
 
@@ -141,7 +142,7 @@ jobs:
       - name: Stamp the FMessenger-controlled version
         shell: bash
         run: |
-          sed -i 's/patchVersion = "26"/patchVersion = "26-fmessenger.1"/' buildSrc/src/main/kotlin/BuildVersionsSDK.kt
+          sed -i 's/patchVersion = "26"/patchVersion = "26-fmessenger.2"/' buildSrc/src/main/kotlin/BuildVersionsSDK.kt
       - name: Assemble release AAR
         run: ./gradlew :sdk:sdk-android:assembleRelease
       - name: Name and hash immutable artifact
